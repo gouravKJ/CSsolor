@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>CamousSolarPlanner</title>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- SheetJS -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- jsPDF -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <style>
+    :root{
+      --bg:#f6f9fc; --card:#ffffff; --accent:#0ea5a4; --muted:#64748b; --glass: rgba(255,255,255,0.6);
+      --max-width:1400px; --gap:14px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{font-family:Inter,Segoe UI,Arial,Helvetica,sans-serif;margin:0;background:linear-gradient(180deg,#f8fafc 0%,var(--bg) 100%);color:#0f172a;-webkit-font-smoothing:antialiased}
+    .wrap{max-width:var(--max-width);margin:12px auto;padding:12px}
+
+    /* navbar */
+    .navbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border-radius:12px;background:linear-gradient(90deg,rgba(14,165,164,0.06),rgba(99,102,241,0.02));box-shadow:0 6px 18px rgba(12,15,30,0.04);}
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#06b6d4,#7c3aed);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700}
+    .title{font-size:18px;font-weight:700}
+    .nav-actions{display:flex;gap:8px;align-items:center}
+    .nav-actions button{padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:white;cursor:pointer}
+    .nav-toggle{display:none;background:transparent;border:none;font-size:18px;padding:8px}
+
+    /* main layout: stack inputs then overview then cashflows */
+    .grid{display:grid;grid-template-columns:1fr;gap:var(--gap);margin-top:16px}
+    .card{background:var(--card);border-radius:12px;padding:14px;box-shadow:0 6px 18px rgba(12,15,30,0.05)}
+    h1,h2{margin:0 0 8px}
+    label{display:block;font-size:13px;margin-bottom:6px;color:var(--muted)}
+    input,select{width:100%;padding:10px;border-radius:10px;border:1px solid #e6edf3;background:white}
+    .form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+    .form-grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+    .actions{display:flex;gap:8px;margin-top:12px}
+    button.primary{background:var(--accent);color:#fff;padding:10px 12px;border:none;border-radius:10px;cursor:pointer}
+    button.ghost{background:transparent;border:1px solid #e2e8f0;padding:10px;border-radius:10px;cursor:pointer}
+
+    .kpis{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+    .kpi{background:linear-gradient(180deg,#ffffff,#fbfeff);padding:10px;border-radius:10px;min-width:150px;flex:1;box-shadow:0 4px 10px rgba(2,6,23,0.03)}
+
+    /* charts area */
+    .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+    .chart-wrap{background:linear-gradient(180deg,#fff,#fcfeff);padding:12px;border-radius:10px}
+    canvas{width:100% !important;max-width:100%;height:300px !important}
+
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    thead th{position:sticky;top:0;background:#fff;z-index:2}
+    th,td{padding:8px;border-bottom:1px solid #eef2f7;font-size:13px;text-align:right}
+    th{background:#f8fafc;text-align:left}
+
+    /* mobile friendliness */
+    .card{padding:12px}
+    input,button{touch-action:manipulation}
+    table-wrapper{display:block}
+    .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+    /* responsive adjustments */
+    @media (max-width:1000px){
+      .form-grid-3{grid-template-columns:repeat(2,1fr)}
+      .charts{grid-template-columns:1fr}
+      canvas{height:260px !important}
+    }
+    @media (max-width:640px){
+      .navbar{flex-direction:row;gap:8px}
+      .nav-actions{display:none}
+      .nav-toggle{display:block}
+      .form-grid{grid-template-columns:1fr}
+      .form-grid-3{grid-template-columns:1fr}
+      .kpi{min-width:140px;font-size:13px}
+      canvas{height:240px !important}
+      .actions{flex-direction:column}
+      button.primary, button.ghost{width:100%}
+      .charts{grid-template-columns:1fr}
+      .table-scroll{overflow-x:auto}
+    }
+
+    /* wide screen tweak */
+    @media (min-width:1400px){
+      canvas{height:360px !important}
+    }
+
+    /* small helpers */
+    .muted{color:var(--muted);font-size:13px}
+    .right{text-align:right}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="navbar">
+      <div class="brand">
+        <div class="logo">CS</div>
+        <div>
+          <div class="title">CampusSolarPlanner</div>
+          <div class="muted">Prototype — financial engine</div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="nav-toggle" id="navToggle" aria-label="menu">☰</button>
+        <div class="nav-actions" id="navActions">
+          <button id="topCalc">Calculate</button>
+          <button id="topXLS">Export Excel</button>
+          <button id="topPDF">Export PDF</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- Inputs card (top) -->
+      <div class="card" id="inputsCard">
+        <h2>Inputs</h2>
+        <p class="muted">Enter hostel energy & financial assumptions. System size computed automatically if left blank.</p>
+
+        <div class="form-grid" style="margin-top:10px">
+          <div>
+            <label>Average monthly consumption (kWh)</label>
+            <input id="monthly_kwh" type="number" value="6000" />
+          </div>
+          <div>
+            <label>System size (kW) — leave blank to auto-calc</label>
+            <input id="size_kw" type="number" placeholder="Auto" />
+          </div>
+          <div>
+            <label>Specific yield (kWh/kW/yr)</label>
+            <input id="yield" type="number" value="1500" />
+          </div>
+          <div>
+            <label>CAPEX per kW (₹)</label>
+            <input id="capex_kw" type="number" value="50000" />
+          </div>
+          <div>
+            <label>O&amp;M (% of CAPEX /year)</label>
+            <input id="om_pct" type="number" value="1.5" />
+          </div>
+          <div>
+            <label>Tariff (₹/kWh)</label>
+            <input id="tariff" type="number" value="8" />
+          </div>
+        </div>
+
+        <div class="form-grid-3" style="margin-top:10px">
+          <div>
+            <label>Tariff escalation (%/yr)</label>
+            <input id="esc" type="number" value="3" />
+          </div>
+          <div>
+            <label>Discount rate (%/yr)</label>
+            <input id="disc" type="number" value="10" />
+          </div>
+          <div>
+            <label>Degradation (%/yr)</label>
+            <input id="degrad" type="number" value="0.7" />
+          </div>
+        </div>
+
+        <div class="form-grid" style="margin-top:10px">
+          <div>
+            <label>Project life (years)</label>
+            <input id="life" type="number" value="25" />
+          </div>
+          <div>
+            <label>Inverter replacement year</label>
+            <input id="inv_year" type="number" value="12" />
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:14px" class="actions">
+          <button id="calcBtn" class="primary">Calculate</button>
+          <button id="resetBtn" class="ghost" onclick="resetForm()">Reset</button>
+        </div>
+      </div>
+
+      <!-- Overview card -->
+      <div class="card" id="overviewCard">
+        <h2>Overview</h2>
+        <div class="kpis" id="kpis"></div>
+
+        <div class="charts" style="margin-top:12px">
+          <div class="chart-wrap">
+            <div style="display:flex;justify-content:space-between;align-items:center"><div style="font-weight:700">Generation</div><div class="muted">kWh / year</div></div>
+            <canvas id="genChart"></canvas>
+          </div>
+          <div class="chart-wrap">
+            <div style="display:flex;justify-content:space-between;align-items:center"><div style="font-weight:700">Costs & Savings</div><div class="muted">₹ / year</div></div>
+            <canvas id="costChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cashflows card (below overview) -->
+      <div class="card">
+        <h2>Yearly Cashflows</h2>
+        <div class="table-scroll" style="overflow:auto;max-height:420px">
+          <table id="cfTable"><thead><tr>
+            <th>Year</th><th>Tariff (₹/kWh)</th><th>PV Gen (kWh)</th><th>Grid Cost (₹)</th><th>O&amp;M (₹)</th><th>Replacement (₹)</th><th>Solar+Grid Cost (₹)</th><th>Net Savings (₹)</th><th>Discounted CF (₹)</th>
+          </tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+
+      <!-- Quick actions card -->
+      <div class="card">
+        <h2>Quick Actions</h2>
+        <p class="muted">Use these buttons to export or reset.</p>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <button id="exportXLS" class="primary">Export Excel</button>
+          <button id="exportPDF" class="ghost">Export PDF</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+// Mobile nav toggle
+const navToggle = document.getElementById('navToggle');
+const navActions = document.getElementById('navActions');
+navToggle.addEventListener('click', ()=>{ if(navActions.style.display==='flex') navActions.style.display='none'; else navActions.style.display='flex'; });
+
+// top nav buttons wiring
+document.getElementById('topCalc').addEventListener('click', ()=> document.getElementById('calcBtn').click());
+document.getElementById('topXLS').addEventListener('click', ()=> document.getElementById('exportXLS').click());
+document.getElementById('topPDF').addEventListener('click', ()=> document.getElementById('exportPDF').click());
+
+// Financial engine (improved responsive charts and separated datasets)
+function compute(inputs){
+  const life = Number(inputs.life);
+  const monthly_kwh = Number(inputs.monthly_kwh);
+  const size_kw = inputs.size_kw || Math.max(1, (monthly_kwh*12)/ (inputs.yield * 12));
+  const capex_total = size_kw * inputs.capex_kw;
+  const om_pct = inputs.om_pct/100;
+  const degrad = inputs.degrad/100;
+  const tariff0 = inputs.tariff;
+  const esc = inputs.esc/100;
+  const disc = inputs.disc/100;
+  const inv_year = inputs.inv_year;
+  const inv_pct = inputs.inv_pct/100 || 0.12;
+  const yield_kwh = inputs.yield;
+
+  const years = Array.from({length:life+1}, (_,i)=>i);
+  const tariff = years.map(y=> +(tariff0 * Math.pow(1+esc, y)).toFixed(4));
+  const gen = years.map(y=> y===0?0: +(size_kw * yield_kwh * Math.pow(1-degrad, y-1)).toFixed(2));
+  const om = years.map(y=> y===0?0: +(capex_total * om_pct).toFixed(2));
+  const repl = years.map(y=> y===inv_year? +(capex_total * inv_pct).toFixed(0):0);
+  const grid_cost = years.map((y,i)=> +(gen[i] * tariff[i]).toFixed(2));
+  const solar_cost = years.map((y,i)=> +(om[i] + repl[i] + (i===0?capex_total:0)).toFixed(2));
+  const net = years.map((y,i)=> +(grid_cost[i] - solar_cost[i]).toFixed(2));
+  net[0] = -Math.round(capex_total);
+  const disc_factor = years.map(y=> 1/Math.pow(1+disc, y));
+  const disc_cf = net.map((v,i)=> +(v * disc_factor[i]).toFixed(2));
+
+  const npv = +(disc_cf.reduce((a,b)=>a+b,0)).toFixed(2);
+  const irr = computeIRR(net);
+  const simplePayback = computeSimplePayback(net);
+  const discPayback = computeSimplePayback(disc_cf);
+
+  return {years, tariff, gen, om, repl, grid_cost, solar_cost, net, disc_cf, npv, irr, simplePayback, discPayback, capex_total, size_kw};
+}
+
+// IRR solver (secant method)
+function computeIRR(cashflows){
+  const maxIter = 200; const tol = 1e-6;
+  let x0 = 0.05, x1 = 0.2;
+  const npv = (r)=> cashflows.reduce((s,cf,i)=> s + cf/Math.pow(1+r,i),0);
+  for(let i=0;i<maxIter;i++){
+    const f0 = npv(x0), f1 = npv(x1);
+    if(Math.abs(f1-f0) < 1e-12) break;
+    const x2 = x1 - f1*(x1-x0)/(f1-f0);
+    if(!isFinite(x2)) break;
+    if(Math.abs(x2-x1) < tol) return +(x2*100).toFixed(2);
+    x0=x1; x1=x2;
+  }
+  return 'NA';
+}
+function computeSimplePayback(arr){let cum=0; for(let i=0;i<arr.length;i++){ cum += arr[i]; if(cum>=0) return i;} return 'NA';}
+
+// helpers
+const $ = id => document.getElementById(id);
+function readInputs(){
+  return {
+    monthly_kwh: Number($('monthly_kwh').value)||0,
+    size_kw: Number($('size_kw').value)||0,
+    yield: Number($('yield').value)||1500,
+    capex_kw: Number($('capex_kw').value)||50000,
+    om_pct: Number($('om_pct').value)||1.5,
+    tariff: Number($('tariff').value)||8,
+    esc: Number($('esc').value)||3,
+    disc: Number($('disc').value)||10,
+    degrad: Number($('degrad').value)||0.7,
+    life: Number($('life').value)||25,
+    inv_year: Number($('inv_year').value)||12,
+    inv_pct: Number($('inv_pct')? $('inv_pct').value : 12)||12
+  };
+}
+
+let currentResult=null; let genChart=null; let costChart=null;
+function renderResults(res){
+  // KPIs
+  const kpis = $('kpis'); kpis.innerHTML='';
+  const mk = (title,val)=>{ const el=document.createElement('div'); el.className='kpi'; el.innerHTML=`<div style="font-size:12px;color:var(--muted)">${title}</div><div style="font-weight:700;margin-top:6px;font-size:16px">${val}</div>`; return el };
+  kpis.appendChild(mk('Total CAPEX (₹)', formatNumber(res.capex_total)));
+  kpis.appendChild(mk('NPV (₹)', formatNumber(res.npv)));
+  kpis.appendChild(mk('IRR (%)', res.irr));
+  kpis.appendChild(mk('Simple payback (yrs)', res.simplePayback));
+
+  // table
+  const tbody = document.querySelector('#cfTable tbody'); tbody.innerHTML='';
+  for(let i=0;i<res.years.length;i++){
+    const tr=document.createElement('tr'); tr.innerHTML=`<td style="text-align:left">${res.years[i]}</td><td>${res.tariff[i].toFixed(2)}</td><td>${Math.round(res.gen[i])}</td><td>${formatNumber(res.grid_cost[i])}</td><td>${formatNumber(res.om[i])}</td><td>${formatNumber(res.repl[i])}</td><td>${formatNumber(res.solar_cost[i])}</td><td>${formatNumber(res.net[i])}</td><td>${formatNumber(res.disc_cf[i])}</td>`; tbody.appendChild(tr);
+  }
+
+  // generation chart (bar)
+  const genCtx = $('genChart').getContext('2d'); if(genChart) genChart.destroy();
+  genChart = new Chart(genCtx,{type:'bar',data:{labels:res.years.slice(1),datasets:[{label:'PV Gen (kWh)',data:res.gen.slice(1),backgroundColor:'rgba(14,165,164,0.85)'}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{maxRotation:0}},y:{beginAtZero:true}}}});
+
+  // cost chart (line)
+  const costCtx = $('costChart').getContext('2d'); if(costChart) costChart.destroy();
+  costChart = new Chart(costCtx,{type:'line',data:{labels:res.years, datasets:[
+    {label:'Grid Cost (₹)',data:res.grid_cost,borderColor:'rgba(59,130,246,0.95)',fill:false,tension:0.2},
+    {label:'Solar+Grid Cost (₹)',data:res.solar_cost,borderColor:'rgba(234,88,12,0.95)',fill:false,tension:0.2},
+    {label:'Net Savings (₹)',data:res.net,borderColor:'rgba(16,185,129,0.95)',fill:false,tension:0.2}
+  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:true}},scales:{y:{beginAtZero:false}}}});
+
+  // store
+  currentResult=res;
+}
+
+function formatNumber(x){ if(x==='NA') return 'NA'; return Number(x).toLocaleString('en-IN',{maximumFractionDigits:0}); }
+
+// export functions
+function exportExcel(res){
+  const wb = XLSX.utils.book_new();
+  const inputs = readInputs();
+  const inSheet = XLSX.utils.json_to_sheet(Object.entries(inputs).map(([k,v])=>({Parameter:k,Value:v})));
+  XLSX.utils.book_append_sheet(wb,inSheet,'Inputs');
+  const rows = res.years.map((y,i)=>({Year:y,Tariff:res.tariff[i],Generation:Math.round(res.gen[i]),GridCost:res.grid_cost[i],OM:res.om[i],Replacement:res.repl[i],SolarCost:res.solar_cost[i],NetSavings:res.net[i],DiscountedCF:res.disc_cf[i]}));
+  const cfSheet = XLSX.utils.json_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb,cfSheet,'Cashflows');
+  const metrics = [{Metric:'CAPEX',Value:res.capex_total},{Metric:'NPV',Value:res.npv},{Metric:'IRR',Value:res.irr},{Metric:'SimplePayback',Value:res.simplePayback},{Metric:'DiscPayback',Value:res.discPayback}];
+  const mSheet = XLSX.utils.json_to_sheet(metrics);
+  XLSX.utils.book_append_sheet(wb,mSheet,'Metrics');
+  XLSX.writeFile(wb,'HostelSolar_Calculation.xlsx');
+}
+
+async function exportPDF(res){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({orientation:'portrait'});
+  doc.setFontSize(14); doc.text('HostelSolarPlanner — Report',14,16);
+  doc.setFontSize(10); doc.text(`CAPEX: ₹ ${formatNumber(res.capex_total)}   NPV: ₹ ${formatNumber(res.npv)}   IRR: ${res.irr}`,14,24);
+  // add generation chart
+  const genImg = $('genChart').toDataURL('image/png',1.0); doc.addImage(genImg,'PNG',14,30,180,70);
+  const costImg = $('costChart').toDataURL('image/png',1.0); doc.addImage(costImg,'PNG',14,106,180,70);
+  // table first 12 rows
+  doc.setFontSize(9);
+  let y=184; doc.text('Year  Gen(kWh)  GridCost(₹)  SolarCost(₹)  NetSavings(₹)',14,y); y+=6;
+  for(let i=0;i<res.years.length;i++){
+    if(y>270){doc.addPage(); y=20}
+    const line = `${res.years[i]}    ${Math.round(res.gen[i])}    ${Math.round(res.grid_cost[i])}    ${Math.round(res.solar_cost[i])}    ${Math.round(res.net[i])}`;
+    doc.text(line,14,y); y+=6;
+  }
+  doc.save('HostelSolar_Report.pdf');
+}
+
+// UI wiring
+$('calcBtn').addEventListener('click', ()=>{
+  const inputsRaw = {
+    monthly_kwh: Number($('monthly_kwh').value)||0,
+    size_kw: Number($('size_kw').value)||0,
+    yield: Number($('yield').value)||1500,
+    capex_kw: Number($('capex_kw').value)||50000,
+    om_pct: Number($('om_pct').value)||1.5,
+    tariff: Number($('tariff').value)||8,
+    esc: Number($('esc').value)||3,
+    disc: Number($('disc').value)||10,
+    degrad: Number($('degrad').value)||0.7,
+    life: Number($('life').value)||25,
+    inv_year: Number($('inv_year').value)||12,
+    inv_pct: Number($('inv_pct')? $('inv_pct').value : 12)||12
+  };
+  const res = compute(inputsRaw);
+  renderResults(res);
+});
+$('exportXLS').addEventListener('click', ()=>{ if(!currentResult) return alert('Run calculation first'); exportExcel(currentResult); });
+$('exportPDF').addEventListener('click', ()=>{ if(!currentResult) return alert('Run calculation first'); exportPDF(currentResult); });
+$('resetBtn').addEventListener('click', ()=> resetForm());
+
+function resetForm(){ $('monthly_kwh').value='6000'; $('size_kw').value=''; $('yield').value='1500'; $('capex_kw').value='50000'; $('om_pct').value='1.5'; $('tariff').value='8'; $('esc').value='3'; $('disc').value='10'; $('degrad').value='0.7'; $('life').value='25'; $('inv_year').value='12'; if(window.genChart) genChart.destroy(); if(window.costChart) costChart.destroy(); document.querySelector('#cfTable tbody').innerHTML=''; document.getElementById('kpis').innerHTML=''; currentResult=null; }
+
+// initial calc
+window.addEventListener('load', ()=> document.getElementById('calcBtn').click());
+</script>
+</body>
+</html>
